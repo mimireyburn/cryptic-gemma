@@ -1,9 +1,13 @@
 import os
 import torch
+import pandas as pd
+from torch.utils.data import Dataset
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig, GemmaTokenizer
 from peft import LoraConfig
 import transformers
 from trl import SFTTrainer
+from dotenv import load_dotenv
+
 
 model_id = "google/gemma-7b"
 bnb_config = BitsAndBytesConfig(
@@ -15,6 +19,15 @@ bnb_config = BitsAndBytesConfig(
 tokenizer = AutoTokenizer.from_pretrained(model_id, token=os.environ['HF_TOKEN'])
 model = AutoModelForCausalLM.from_pretrained(model_id, quantization_config=bnb_config, device_map={"":0}, token=os.environ['HF_TOKEN'])
 
+def example(model, tokenizer):
+    text = "Quote: Imagination is more"
+    device = "cuda:0"
+    inputs = tokenizer(text, return_tensors="pt").to(device)
+
+    outputs = model.generate(**inputs, max_new_tokens=20)
+    print(tokenizer.decode(outputs[0], skip_special_tokens=True))
+
+
 os.environ["WANDB_DISABLED"] = "true"
 
 lora_config = LoraConfig(
@@ -23,15 +36,26 @@ lora_config = LoraConfig(
     task_type="CAUSAL_LM",
 )
 
+
+data = load_dataset("csv", data_files="cryptics.csv", split="train", trust_remote_code=True)
+data = data.map(lambda x: tokenizer(x["clue"], return_tensors="pt", padding="max_length", truncation=True), batched=True)
+
+
 def formatting_func(example):
-    text = f"Given the following cryptic clue for a British cryptic crossword, what is the answer?\nClue: {example['clue']}\nAnswer: {example['answer']}"
+    prompt_template = f"""
+    Given the following cryptic clue for a British crytpic crossword, provide the corresponding answer:
+    Clue:
+    {clue}
+    Answer:
+    {answer}
+    """
+    text = prompt_template.format(example["clue"], example["answer"])
     return [text]
 
-data = CrypticDataset(tokenizer, "train.csv")
 
 trainer = SFTTrainer(
     model=model,
-    train_dataset=data,
+    train_dataset=data["train"],
     args=transformers.TrainingArguments(
         per_device_train_batch_size=1,
         gradient_accumulation_steps=4,
@@ -47,4 +71,3 @@ trainer = SFTTrainer(
     formatting_func=formatting_func,
 )
 trainer.train()
-model.save_pretrained("./weights")
