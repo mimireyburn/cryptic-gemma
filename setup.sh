@@ -5,3 +5,4 @@ pip3 install accelerate
 pip3 install -q -U datasets==2.17.0
 pip3 install -q -U transformers==4.38.1
 pip3 install python-dotenv
+pip3 install wandb
